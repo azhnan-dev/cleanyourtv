@@ -373,16 +373,21 @@ else
     # Cari APK — build lokal atau download
     APK_PATH="$SCRIPT_DIR/launcher/app/build/outputs/apk/release/app-release.apk"
 
-    if [ ! -f "$APK_PATH" ]; then
+    # Cek APK di root repo dulu (pre-built yang disertakan)
+    REPO_APK="$SCRIPT_DIR/app-release.apk"
+    if [ -f "$REPO_APK" ]; then
+      APK_PATH="$REPO_APK"
+      ok "Pakai APK dari repo: $APK_PATH"
+    elif [ ! -f "$APK_PATH" ]; then
       echo ""
-      info "APK belum ada. Coba download dari GitHub releases..."
-      APK_URL="https://github.com/Gathin23/cleanyourtv/releases/latest/download/app-release.apk"
-      APK_PATH="$SCRIPT_DIR/launcher-release.apk"
+      info "APK belum ada. Coba download dari repo..."
+      APK_URL="https://raw.githubusercontent.com/azhnan-dev/cleanyourtv/main/app-release.apk"
+      APK_PATH="$SCRIPT_DIR/app-release.apk"
       if wget -q --show-progress -O "$APK_PATH" "$APK_URL" 2>/dev/null; then
         ok "APK berhasil didownload: $APK_PATH"
       else
-        err "Download gagal. Kamu perlu build APK dulu di PC, lalu copy ke:"
-        echo "    $SCRIPT_DIR/launcher-release.apk"
+        err "Download gagal. Copy APK ke folder repo:"
+        echo "    $SCRIPT_DIR/app-release.apk"
         echo ""
         ask "Path APK (kosongkan untuk skip): "
         read -r custom_apk
