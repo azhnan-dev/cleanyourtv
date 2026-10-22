@@ -135,23 +135,73 @@ while true; do
   fi
 done
 
-# Cek port 5555 dulu
-info "Cek port ADB ($TV_IP:5555)..."
-if ! (echo >/dev/tcp/"$TV_IP"/5555) 2>/dev/null; then
+# Fungsi: tampilkan panduan aktifkan USB debugging
+show_usb_debug_guide() {
   echo ""
-  warn "Port 5555 tertutup. USB Debugging mungkin belum aktif."
+  echo -e "  ${BOLD}Cara aktifkan USB Debugging di TV:${RESET}"
   echo ""
-  echo "  Di TV, buka:"
-  echo "  Settings → Device Preferences → About"
-  echo "  → Tekan OK pada 'Build' 7x"
-  echo "  → Kembali → Developer options"
-  echo "  → Aktifkan 'USB debugging' DAN 'Network/ADB debugging'"
+  echo -e "  ${CYAN}Android TV / Google TV:${RESET}"
+  echo "  1. Settings → Device Preferences → About"
+  echo "  2. Arahkan ke 'Build' → tekan OK sebanyak 7x"
+  echo "     sampai muncul 'You are now a developer!'"
+  echo "  3. Kembali → Developer options"
+  echo "  4. Aktifkan 'USB debugging'"
+  echo "  5. Aktifkan 'Network debugging' atau 'ADB debugging' (kalau ada)"
   echo ""
-  confirm "Sudah diaktifkan, coba lagi?" y || { echo "Dibatalkan."; exit 1; }
+  echo -e "  ${CYAN}Xiaomi Mi TV / Redmi TV:${RESET}"
+  echo "  1. Settings → Device Preferences → About"
+  echo "  2. Tekan OK pada 'Build' 7x"
+  echo "  3. Developer options → USB Debugging ON"
+  echo "     + ADB Debugging / Network Debugging ON"
+  echo ""
+  echo -e "  ${YELLOW}Tips:${RESET} Setelah aktif, pastikan TV tidak sleep."
+  echo "  Kalau TV sleep, ADB bisa terputus."
+  echo ""
+}
 
-  if ! (echo >/dev/tcp/"$TV_IP"/5555) 2>/dev/null; then
-    err "Port masih tertutup. Pastikan TV dan HP di Wi-Fi yang sama."
-    exit 1
+# Cek port 5555 dengan retry loop + countdown
+check_port() {
+  (echo >/dev/tcp/"$TV_IP"/5555) 2>/dev/null
+}
+
+info "Cek port ADB ($TV_IP:5555)..."
+if ! check_port; then
+  echo ""
+  warn "Port 5555 tertutup — USB Debugging belum aktif atau TV belum siap."
+  show_usb_debug_guide
+
+  # Loop: cek otomatis tiap 5 detik, max 12x (1 menit)
+  MAX_RETRY=12
+  RETRY=0
+  PORT_OPEN=0
+  echo -e "  ${CYAN}Menunggu USB Debugging aktif... (otomatis cek tiap 5 detik)${RESET}"
+  echo -e "  Tekan ${BOLD}Ctrl+C${RESET} untuk batalkan."
+  echo ""
+  while [ $RETRY -lt $MAX_RETRY ]; do
+    RETRY=$((RETRY + 1))
+    SISA=$((MAX_RETRY - RETRY))
+    echo -ne "  Percobaan $RETRY/$MAX_RETRY — cek port 5555... "
+    if check_port; then
+      echo -e "${GREEN}TERBUKA!${RESET}"
+      PORT_OPEN=1
+      break
+    else
+      echo -e "${RED}tertutup${RESET} (coba lagi dalam 5 detik, sisa $SISA percobaan)"
+      sleep 5
+    fi
+  done
+
+  if [ "$PORT_OPEN" = "0" ]; then
+    echo ""
+    err "Port 5555 masih tertutup setelah 1 menit."
+    echo ""
+    echo "  Kemungkinan penyebab:"
+    echo "  - USB Debugging belum diaktifkan di TV"
+    echo "  - TV dan HP beda Wi-Fi / jaringan"
+    echo "  - IP TV salah (cek lagi di Settings → Network)"
+    echo "  - TV dalam mode sleep"
+    echo ""
+    confirm "Mau coba lagi dari awal?" n && exec bash "$0" || exit 1
   fi
 fi
 ok "Port 5555 terbuka"
@@ -159,15 +209,44 @@ ok "Port 5555 terbuka"
 # Konek ADB
 info "Konek ADB ke $TV_IP..."
 echo ""
-echo "  ⚠ Nanti di TV akan muncul prompt 'Allow USB debugging?'"
-echo "    Pilih 'Always allow' lalu OK."
+echo -e "  ${YELLOW}⚠ Di TV akan muncul popup 'Allow USB debugging?'${RESET}"
+echo "    → Pilih 'Always allow from this device'"
+echo "    → Tekan OK"
 echo ""
-ask "Tekan Enter setelah kamu siap..."
+ask "Tekan Enter setelah popup muncul di TV (atau sudah pernah allow sebelumnya)..."
 read -r
 
-if ! TV_HOST="$TV_IP" "$PY" -I "$TOOLS/tv.py" "echo connected" 2>/dev/null | grep -q "connected"; then
-  err "Gagal konek. Pastikan kamu klik 'Allow' di TV."
-  exit 1
+# Coba konek, retry 3x (kadang butuh beberapa detik setelah allow)
+CONN_OK=0
+for i in 1 2 3; do
+  echo -ne "  Konek ADB percobaan $i/3... "
+  if TV_HOST="$TV_IP" "$PY" -I "$TOOLS/tv.py" "echo connected" 2>/dev/null | grep -q "connected"; then
+    echo -e "${GREEN}OK${RESET}"
+    CONN_OK=1
+    break
+  else
+    echo -e "${RED}gagal${RESET}"
+    [ $i -lt 3 ] && sleep 3
+  fi
+done
+
+if [ "$CONN_OK" = "0" ]; then
+  echo ""
+  err "Gagal konek ke ADB."
+  echo ""
+  echo "  Cek:"
+  echo "  - Sudah klik 'Allow' di popup TV?"
+  echo "  - USB Debugging masih aktif?"
+  echo "  - IP TV benar? ($TV_IP)"
+  echo ""
+  confirm "Mau coba lagi?" y && {
+    ask "Tekan Enter setelah siap..."
+    read -r
+    if TV_HOST="$TV_IP" "$PY" -I "$TOOLS/tv.py" "echo connected" 2>/dev/null | grep -q "connected"; then
+      CONN_OK=1
+    fi
+  }
+  [ "$CONN_OK" = "0" ] && { err "Masih gagal. Keluar."; exit 1; }
 fi
 ok "ADB tersambung ke $TV_IP"
 
